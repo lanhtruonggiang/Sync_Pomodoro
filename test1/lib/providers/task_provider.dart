@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
 import '../models/task_model.dart';
 
 class TaskProvider extends ChangeNotifier {
@@ -17,8 +19,9 @@ class TaskProvider extends ChangeNotifier {
   // --- LOCAL STORAGE LOGIC ---
   Future<void> _saveTasksToStorage() async {
     final prefs = await SharedPreferences.getInstance();
-    final List<Map<String, dynamic>> jsonData =
-        _tasks.map((task) => task.toJson()).toList();
+    final List<Map<String, dynamic>> jsonData = _tasks
+        .map((task) => task.toJson())
+        .toList();
     await prefs.setString(_storageKey, jsonEncode(jsonData));
   }
 
@@ -30,7 +33,7 @@ class TaskProvider extends ChangeNotifier {
       try {
         final List<dynamic> jsonList = jsonDecode(rawData);
         _tasks = jsonList.map((item) => TaskModel.fromJson(item)).toList();
-        
+
         // Tự động khôi phục logic thời gian dựa trên mốc targetEndTime
         _restoreRunningTimers();
       } catch (e) {
@@ -93,8 +96,8 @@ class TaskProvider extends ChangeNotifier {
     final task = _tasks[index];
 
     if (task.isRunning) {
-      // Pause task: Hủy timer và ghi nhận số giây còn lại thực tế
       task.timer?.cancel();
+      task.timer = null; // Reset reference
       if (task.targetEndTime != null) {
         final now = DateTime.now();
         final diff = task.targetEndTime!.difference(now).inSeconds;
@@ -105,9 +108,10 @@ class TaskProvider extends ChangeNotifier {
     } else {
       if (task.remainingSeconds <= 0) return;
 
-      // Start task: Tính mốc targetEndTime = Thời gian hiện tại + số giây còn lại
       task.isRunning = true;
-      task.targetEndTime = DateTime.now().add(Duration(seconds: task.remainingSeconds));
+      task.targetEndTime = DateTime.now().add(
+        Duration(seconds: task.remainingSeconds),
+      );
       _startTimerInstance(task);
     }
 
@@ -126,7 +130,7 @@ class TaskProvider extends ChangeNotifier {
     task.timer?.cancel();
     task.isRunning = false;
     task.targetEndTime = null;
-    
+
     // Set lại về thời gian ban đầu khi mới tạo task
     task.remainingSeconds = task.initialTotalSeconds;
 
@@ -135,25 +139,32 @@ class TaskProvider extends ChangeNotifier {
   }
 
   void _startTimerInstance(TaskModel task) {
+    // Đảm bảo hủy hoàn toàn timer cũ nếu đang chạy
     task.timer?.cancel();
+    task.timer = null;
+
     task.timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (task.targetEndTime == null) {
+      if (task.targetEndTime == null || !task.isRunning) {
         timer.cancel();
+        task.timer = null;
         return;
       }
 
       final now = DateTime.now();
+      // Làm tròn số giây chênh lệch thực tế
       final diffSeconds = task.targetEndTime!.difference(now).inSeconds;
 
-      if (diffSeconds > 0) {
-        task.remainingSeconds = diffSeconds;
-        notifyListeners();
+      if (diffSeconds >= 0) {
+        if (task.remainingSeconds != diffSeconds) {
+          task.remainingSeconds = diffSeconds;
+          notifyListeners();
+        }
       } else {
-        // Task hoàn thành
         task.remainingSeconds = 0;
         task.isRunning = false;
         task.targetEndTime = null;
-        task.timer?.cancel();
+        timer.cancel();
+        task.timer = null;
         _saveTasksToStorage();
         notifyListeners();
       }

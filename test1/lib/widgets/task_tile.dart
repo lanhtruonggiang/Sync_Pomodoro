@@ -52,7 +52,7 @@ class TaskTile extends StatelessWidget {
                   heightFactor: 1.0,
                   child: Container(
                     decoration: BoxDecoration(
-                      color: barColor.withOpacity(0.75),
+                      color: barColor.withValues(alpha: 0.75),
                       borderRadius: const BorderRadius.only(
                         topLeft: Radius.circular(10),
                         bottomLeft: Radius.circular(10),

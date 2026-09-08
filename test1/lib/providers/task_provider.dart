@@ -34,13 +34,17 @@ class TaskProvider extends ChangeNotifier {
         final List<dynamic> jsonList = jsonDecode(rawData);
         _tasks = jsonList.map((item) => TaskModel.fromJson(item)).toList();
 
-        // Tự động khôi phục logic thời gian dựa trên mốc targetEndTime
         _restoreRunningTimers();
       } catch (e) {
         _tasks = [];
       }
     }
     notifyListeners();
+  }
+
+  // Khôi phục & Đồng bộ lại thời gian thực tế
+  void recalculateOnResume() {
+    _restoreRunningTimers();
   }
 
   void _restoreRunningTimers() {
@@ -54,14 +58,17 @@ class TaskProvider extends ChangeNotifier {
           task.remainingSeconds = diffSeconds;
           _startTimerInstance(task);
         } else {
-          // Task đã đếm hết giờ trong lúc đóng app/tab
+          // Task đã kết thúc trong lúc đóng/ẩn app
           task.remainingSeconds = 0;
           task.isRunning = false;
           task.targetEndTime = null;
+          task.timer?.cancel();
+          task.timer = null;
         }
       }
     }
     _saveTasksToStorage();
+    notifyListeners();
   }
 
   // --- HELPER LOGIC ---
@@ -81,7 +88,7 @@ class TaskProvider extends ChangeNotifier {
     final newTask = TaskModel(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
       name: name.trim(),
-      initialTotalSeconds: totalSeconds, // Lưu mốc thời gian khởi tạo ban đầu
+      initialTotalSeconds: totalSeconds,
       remainingSeconds: totalSeconds,
     );
     _tasks.add(newTask);
@@ -97,7 +104,7 @@ class TaskProvider extends ChangeNotifier {
 
     if (task.isRunning) {
       task.timer?.cancel();
-      task.timer = null; // Reset reference
+      task.timer = null;
       if (task.targetEndTime != null) {
         final now = DateTime.now();
         final diff = task.targetEndTime!.difference(now).inSeconds;
@@ -119,19 +126,15 @@ class TaskProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  // --- HÀM RESET TASK VỀ THỜI GIAN BAN ĐẦU ---
   void resetTaskTimer(String id) {
     final index = _tasks.indexWhere((task) => task.id == id);
     if (index == -1) return;
 
     final task = _tasks[index];
 
-    // Hủy timer nếu đang chạy
     task.timer?.cancel();
     task.isRunning = false;
     task.targetEndTime = null;
-
-    // Set lại về thời gian ban đầu khi mới tạo task
     task.remainingSeconds = task.initialTotalSeconds;
 
     _saveTasksToStorage();
@@ -139,32 +142,30 @@ class TaskProvider extends ChangeNotifier {
   }
 
   void _startTimerInstance(TaskModel task) {
-  task.timer?.cancel();
-  task.timer = null;
+    task.timer?.cancel();
+    task.timer = null;
 
-  task.timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-    if (task.targetEndTime == null || !task.isRunning) {
-      timer.cancel();
-      task.timer = null;
-      return;
-    }
+    task.timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (task.targetEndTime == null || !task.isRunning) {
+        timer.cancel();
+        task.timer = null;
+        return;
+      }
 
-    // Đang mở app: Giảm dần từng giây để UI mượt mà, không bị chênh lệch ms của DateTime.now()
-    if (task.remainingSeconds > 1) {
-      task.remainingSeconds--;
-      notifyListeners();
-    } else {
-      // Khi đếm về 0: Hoàn thành task
-      task.remainingSeconds = 0;
-      task.isRunning = false;
-      task.targetEndTime = null;
-      timer.cancel();
-      task.timer = null;
-      _saveTasksToStorage();
-      notifyListeners();
-    }
-  });
-}
+      if (task.remainingSeconds > 1) {
+        task.remainingSeconds--;
+        notifyListeners();
+      } else {
+        task.remainingSeconds = 0;
+        task.isRunning = false;
+        task.targetEndTime = null;
+        timer.cancel();
+        task.timer = null;
+        _saveTasksToStorage();
+        notifyListeners();
+      }
+    });
+  }
 
   void deleteTask(String id) {
     final index = _tasks.indexWhere((task) => task.id == id);

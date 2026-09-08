@@ -139,37 +139,32 @@ class TaskProvider extends ChangeNotifier {
   }
 
   void _startTimerInstance(TaskModel task) {
-    // Đảm bảo hủy hoàn toàn timer cũ nếu đang chạy
-    task.timer?.cancel();
-    task.timer = null;
+  task.timer?.cancel();
+  task.timer = null;
 
-    task.timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (task.targetEndTime == null || !task.isRunning) {
-        timer.cancel();
-        task.timer = null;
-        return;
-      }
+  task.timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+    if (task.targetEndTime == null || !task.isRunning) {
+      timer.cancel();
+      task.timer = null;
+      return;
+    }
 
-      final now = DateTime.now();
-      // Làm tròn số giây chênh lệch thực tế
-      final diffSeconds = task.targetEndTime!.difference(now).inSeconds;
-
-      if (diffSeconds >= 0) {
-        if (task.remainingSeconds != diffSeconds) {
-          task.remainingSeconds = diffSeconds;
-          notifyListeners();
-        }
-      } else {
-        task.remainingSeconds = 0;
-        task.isRunning = false;
-        task.targetEndTime = null;
-        timer.cancel();
-        task.timer = null;
-        _saveTasksToStorage();
-        notifyListeners();
-      }
-    });
-  }
+    // Đang mở app: Giảm dần từng giây để UI mượt mà, không bị chênh lệch ms của DateTime.now()
+    if (task.remainingSeconds > 1) {
+      task.remainingSeconds--;
+      notifyListeners();
+    } else {
+      // Khi đếm về 0: Hoàn thành task
+      task.remainingSeconds = 0;
+      task.isRunning = false;
+      task.targetEndTime = null;
+      timer.cancel();
+      task.timer = null;
+      _saveTasksToStorage();
+      notifyListeners();
+    }
+  });
+}
 
   void deleteTask(String id) {
     final index = _tasks.indexWhere((task) => task.id == id);

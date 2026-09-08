@@ -4,6 +4,7 @@ import 'providers/task_provider.dart';
 import 'screens/home_screen.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized(); // Đảm bảo SharedPreferences chạy mượt trên Web/App
   runApp(
     ChangeNotifierProvider(
       create: (_) => TaskProvider(),

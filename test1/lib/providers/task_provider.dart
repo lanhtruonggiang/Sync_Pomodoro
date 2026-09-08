@@ -1,24 +1,78 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/task_model.dart';
 
 class TaskProvider extends ChangeNotifier {
-  final List<TaskModel> _tasks = [];
+  static const String _storageKey = 'local_tasks_data';
+  List<TaskModel> _tasks = [];
 
   List<TaskModel> get tasks => List.unmodifiable(_tasks);
 
-  // Validation kiểm tra tên trùng lặp (không phân biệt hoa/thường)
+  TaskProvider() {
+    _loadTasksFromStorage();
+  }
+
+  // --- LOCAL STORAGE LOGIC ---
+  Future<void> _saveTasksToStorage() async {
+    final prefs = await SharedPreferences.getInstance();
+    final List<Map<String, dynamic>> jsonData =
+        _tasks.map((task) => task.toJson()).toList();
+    await prefs.setString(_storageKey, jsonEncode(jsonData));
+  }
+
+  Future<void> _loadTasksFromStorage() async {
+    final prefs = await SharedPreferences.getInstance();
+    final String? rawData = prefs.getString(_storageKey);
+
+    if (rawData != null && rawData.isNotEmpty) {
+      try {
+        final List<dynamic> jsonList = jsonDecode(rawData);
+        _tasks = jsonList.map((item) => TaskModel.fromJson(item)).toList();
+        
+        // Tự động khôi phục logic thời gian dựa trên timestamp delta khi mở lại app
+        _restoreRunningTimers();
+      } catch (e) {
+        _tasks = [];
+      }
+    }
+    notifyListeners();
+  }
+
+  void _restoreRunningTimers() {
+    final now = DateTime.now();
+
+    for (var task in _tasks) {
+      if (task.isRunning && task.targetEndTime != null) {
+        final diffSeconds = task.targetEndTime!.difference(now).inSeconds;
+
+        if (diffSeconds > 0) {
+          task.remainingSeconds = diffSeconds;
+          _startTimerInstance(task);
+        } else {
+          // Task đã đếm hết giờ trong lúc đóng app/tab
+          task.remainingSeconds = 0;
+          task.isRunning = false;
+          task.targetEndTime = null;
+        }
+      }
+    }
+    _saveTasksToStorage();
+  }
+
+  // --- HELPER LOGIC ---
   bool isTaskNameDuplicate(String name) {
     return _tasks.any(
       (task) => task.name.trim().toLowerCase() == name.trim().toLowerCase(),
     );
   }
 
-  // Auto normalize thời gian quy đổi ra tổng số giây
   int normalizeToSeconds(int hours, int minutes, int seconds) {
     return (hours * 3600) + (minutes * 60) + seconds;
   }
 
+  // --- TASK MANAGEMENT LOGIC ---
   void addTask(String name, int hours, int minutes, int seconds) {
     int totalSeconds = normalizeToSeconds(hours, minutes, seconds);
     final newTask = TaskModel(
@@ -27,6 +81,7 @@ class TaskProvider extends ChangeNotifier {
       remainingSeconds: totalSeconds,
     );
     _tasks.add(newTask);
+    _saveTasksToStorage();
     notifyListeners();
   }
 
@@ -37,24 +92,52 @@ class TaskProvider extends ChangeNotifier {
     final task = _tasks[index];
 
     if (task.isRunning) {
+      // Pause task: Huỷ timer và tính lại số giây còn lại thực tế
       task.timer?.cancel();
+      if (task.targetEndTime != null) {
+        final now = DateTime.now();
+        final diff = task.targetEndTime!.difference(now).inSeconds;
+        task.remainingSeconds = diff > 0 ? diff : 0;
+      }
       task.isRunning = false;
+      task.targetEndTime = null;
     } else {
       if (task.remainingSeconds <= 0) return;
 
+      // Start task: Đặt targetEndTime = thời gian hiện tại + số giây còn lại
       task.isRunning = true;
-      task.timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-        if (task.remainingSeconds > 0) {
-          task.remainingSeconds--;
-          notifyListeners();
-        } else {
-          task.timer?.cancel();
-          task.isRunning = false;
-          notifyListeners();
-        }
-      });
+      task.targetEndTime = DateTime.now().add(Duration(seconds: task.remainingSeconds));
+      _startTimerInstance(task);
     }
+
+    _saveTasksToStorage();
     notifyListeners();
+  }
+
+  void _startTimerInstance(TaskModel task) {
+    task.timer?.cancel();
+    task.timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (task.targetEndTime == null) {
+        timer.cancel();
+        return;
+      }
+
+      final now = DateTime.now();
+      final diffSeconds = task.targetEndTime!.difference(now).inSeconds;
+
+      if (diffSeconds > 0) {
+        task.remainingSeconds = diffSeconds;
+        notifyListeners();
+      } else {
+        // Hoàn thành đếm ngược
+        task.remainingSeconds = 0;
+        task.isRunning = false;
+        task.targetEndTime = null;
+        task.timer?.cancel();
+        _saveTasksToStorage();
+        notifyListeners();
+      }
+    });
   }
 
   void deleteTask(String id) {
@@ -62,6 +145,7 @@ class TaskProvider extends ChangeNotifier {
     if (index != -1) {
       _tasks[index].timer?.cancel();
       _tasks.removeAt(index);
+      _saveTasksToStorage();
       notifyListeners();
     }
   }

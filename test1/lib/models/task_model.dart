@@ -5,6 +5,7 @@ class TaskModel {
   final String name;
   int remainingSeconds;
   bool isRunning;
+  DateTime? targetEndTime; // Mốc thời gian đích khi task đang chạy
   Timer? timer;
 
   TaskModel({
@@ -12,6 +13,7 @@ class TaskModel {
     required this.name,
     required this.remainingSeconds,
     this.isRunning = false,
+    this.targetEndTime,
   });
 
   String get formattedTime {
@@ -24,5 +26,27 @@ class TaskModel {
     String sStr = seconds.toString().padLeft(2, '0');
 
     return "$hStr:$mStr:$sStr";
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'name': name,
+      'remainingSeconds': remainingSeconds,
+      'isRunning': isRunning,
+      'targetEndTime': targetEndTime?.toIso8601String(),
+    };
+  }
+
+  factory TaskModel.fromJson(Map<String, dynamic> json) {
+    return TaskModel(
+      id: json['id'] as String,
+      name: json['name'] as String,
+      remainingSeconds: json['remainingSeconds'] as int,
+      isRunning: json['isRunning'] as bool? ?? false,
+      targetEndTime: json['targetEndTime'] != null
+          ? DateTime.parse(json['targetEndTime'] as String)
+          : null,
+    );
   }
 }

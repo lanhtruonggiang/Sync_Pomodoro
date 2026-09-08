@@ -36,6 +36,7 @@ dependencies:
   cupertino_icons: ^1.0.8
   # Quản lý state
   provider: ^6.1.2
+  shared_preferences: ^2.3.2 # Bổ sung lưu trữ Local Storage
 
   # Firestore / Firebase backend
   firebase_core: ^3.12.1

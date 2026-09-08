@@ -31,7 +31,7 @@ class TaskProvider extends ChangeNotifier {
         final List<dynamic> jsonList = jsonDecode(rawData);
         _tasks = jsonList.map((item) => TaskModel.fromJson(item)).toList();
         
-        // Tự động khôi phục logic thời gian dựa trên timestamp delta khi mở lại app
+        // Tự động khôi phục logic thời gian dựa trên mốc targetEndTime
         _restoreRunningTimers();
       } catch (e) {
         _tasks = [];
@@ -78,6 +78,7 @@ class TaskProvider extends ChangeNotifier {
     final newTask = TaskModel(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
       name: name.trim(),
+      initialTotalSeconds: totalSeconds, // Lưu mốc thời gian khởi tạo ban đầu
       remainingSeconds: totalSeconds,
     );
     _tasks.add(newTask);
@@ -92,7 +93,7 @@ class TaskProvider extends ChangeNotifier {
     final task = _tasks[index];
 
     if (task.isRunning) {
-      // Pause task: Huỷ timer và tính lại số giây còn lại thực tế
+      // Pause task: Hủy timer và ghi nhận số giây còn lại thực tế
       task.timer?.cancel();
       if (task.targetEndTime != null) {
         final now = DateTime.now();
@@ -104,11 +105,30 @@ class TaskProvider extends ChangeNotifier {
     } else {
       if (task.remainingSeconds <= 0) return;
 
-      // Start task: Đặt targetEndTime = thời gian hiện tại + số giây còn lại
+      // Start task: Tính mốc targetEndTime = Thời gian hiện tại + số giây còn lại
       task.isRunning = true;
       task.targetEndTime = DateTime.now().add(Duration(seconds: task.remainingSeconds));
       _startTimerInstance(task);
     }
+
+    _saveTasksToStorage();
+    notifyListeners();
+  }
+
+  // --- HÀM RESET TASK VỀ THỜI GIAN BAN ĐẦU ---
+  void resetTaskTimer(String id) {
+    final index = _tasks.indexWhere((task) => task.id == id);
+    if (index == -1) return;
+
+    final task = _tasks[index];
+
+    // Hủy timer nếu đang chạy
+    task.timer?.cancel();
+    task.isRunning = false;
+    task.targetEndTime = null;
+    
+    // Set lại về thời gian ban đầu khi mới tạo task
+    task.remainingSeconds = task.initialTotalSeconds;
 
     _saveTasksToStorage();
     notifyListeners();
@@ -129,7 +149,7 @@ class TaskProvider extends ChangeNotifier {
         task.remainingSeconds = diffSeconds;
         notifyListeners();
       } else {
-        // Hoàn thành đếm ngược
+        // Task hoàn thành
         task.remainingSeconds = 0;
         task.isRunning = false;
         task.targetEndTime = null;

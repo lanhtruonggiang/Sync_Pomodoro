@@ -3,14 +3,16 @@ import 'dart:async';
 class TaskModel {
   final String id;
   final String name;
-  int remainingSeconds;
+  final int initialTotalSeconds; // Thời gian thiết lập ban đầu (dùng cho Reset)
+  int remainingSeconds;          // Thời gian còn lại hiện tại
   bool isRunning;
-  DateTime? targetEndTime; // Mốc thời gian đích khi task đang chạy
+  DateTime? targetEndTime;      // Mốc thời gian đích khi đang chạy
   Timer? timer;
 
   TaskModel({
     required this.id,
     required this.name,
+    required this.initialTotalSeconds,
     required this.remainingSeconds,
     this.isRunning = false,
     this.targetEndTime,
@@ -32,6 +34,7 @@ class TaskModel {
     return {
       'id': id,
       'name': name,
+      'initialTotalSeconds': initialTotalSeconds,
       'remainingSeconds': remainingSeconds,
       'isRunning': isRunning,
       'targetEndTime': targetEndTime?.toIso8601String(),
@@ -42,6 +45,7 @@ class TaskModel {
     return TaskModel(
       id: json['id'] as String,
       name: json['name'] as String,
+      initialTotalSeconds: (json['initialTotalSeconds'] as int?) ?? (json['remainingSeconds'] as int),
       remainingSeconds: json['remainingSeconds'] as int,
       isRunning: json['isRunning'] as bool? ?? false,
       targetEndTime: json['targetEndTime'] != null

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+
 import '../providers/task_provider.dart';
 import '../widgets/new_task_dialog.dart';
 
@@ -29,7 +30,10 @@ class HomeScreen extends StatelessWidget {
                         final task = provider.tasks[index];
                         return Container(
                           margin: const EdgeInsets.only(bottom: 12),
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 8,
+                          ),
                           decoration: BoxDecoration(
                             border: Border.all(color: Colors.black, width: 2),
                             borderRadius: BorderRadius.circular(12),
@@ -39,20 +43,34 @@ class HomeScreen extends StatelessWidget {
                               Expanded(
                                 child: Text(
                                   '${task.name} : ${task.formattedTime}',
-                                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w500,
+                                  ),
                                   overflow: TextOverflow.ellipsis,
                                 ),
                               ),
                               IconButton(
                                 icon: Icon(
-                                  task.isRunning ? Icons.pause : Icons.play_arrow,
+                                  task.isRunning
+                                      ? Icons.pause
+                                      : Icons.play_arrow,
                                   size: 28,
                                 ),
-                                onPressed: () => provider.toggleTaskTimer(task.id),
+                                onPressed: () =>
+                                    provider.toggleTaskTimer(task.id),
                               ),
                               IconButton(
                                 icon: const Icon(Icons.close, size: 28),
                                 onPressed: () => provider.deleteTask(task.id),
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.refresh),
+                                onPressed: () {
+                                  context.read<TaskProvider>().resetTaskTimer(
+                                    task.id,
+                                  );
+                                },
                               ),
                             ],
                           ),

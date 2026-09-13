@@ -1,77 +1,84 @@
 import 'dart:async';
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-
+import 'package:firebase_auth/firebase_auth.dart';
 import '../models/task_model.dart';
+import '../services/auth_service.dart';
+import '../services/firestore_service.dart';
 
 class TaskProvider extends ChangeNotifier {
-  static const String _storageKey = 'local_tasks_data';
+  final AuthService _authService = AuthService();
+  final FirestoreService _firestoreService = FirestoreService();
+
   List<TaskModel> _tasks = [];
+  StreamSubscription<List<TaskModel>>? _tasksSubscription;
+  StreamSubscription<User?>? _authSubscription;
+  Timer? _uiTicker;
+  
+  User? _currentUser;
+  User? get currentUser => _currentUser;
 
   List<TaskModel> get tasks => List.unmodifiable(_tasks);
 
   TaskProvider() {
-    _loadTasksFromStorage();
+    _initAuthAndDataSync();
   }
 
-  // --- LOCAL STORAGE LOGIC ---
-  Future<void> _saveTasksToStorage() async {
-    final prefs = await SharedPreferences.getInstance();
-    final List<Map<String, dynamic>> jsonData = _tasks
-        .map((task) => task.toJson())
-        .toList();
-    await prefs.setString(_storageKey, jsonEncode(jsonData));
-  }
+  void _initAuthAndDataSync() {
+    _authSubscription = _authService.authStateChanges.listen((user) {
+      _currentUser = user;
+      _tasksSubscription?.cancel();
 
-  Future<void> _loadTasksFromStorage() async {
-    final prefs = await SharedPreferences.getInstance();
-    final String? rawData = prefs.getString(_storageKey);
-
-    if (rawData != null && rawData.isNotEmpty) {
-      try {
-        final List<dynamic> jsonList = jsonDecode(rawData);
-        _tasks = jsonList.map((item) => TaskModel.fromJson(item)).toList();
-
-        _restoreRunningTimers();
-      } catch (e) {
+      if (user != null) {
+        // Lắng nghe Stream Firestore Realtime
+        _tasksSubscription = _firestoreService.streamTasks(user.uid).listen((newTasks) {
+          _tasks = newTasks;
+          _syncLocalCalculations();
+          notifyListeners();
+        });
+        _startLocalUiTicker();
+      } else {
         _tasks = [];
+        _stopLocalUiTicker();
+        notifyListeners();
       }
-    }
-    notifyListeners();
+    });
   }
 
-  // Khôi phục & Đồng bộ lại thời gian thực tế
-  void recalculateOnResume() {
-    _restoreRunningTimers();
+  // Local Ticker: Đếm ngược mượt mà ở Client không gửi Write Request lên Firestore
+  void _startLocalUiTicker() {
+    _uiTicker?.cancel();
+    _uiTicker = Timer.periodic(const Duration(seconds: 1), (_) {
+      _syncLocalCalculations();
+    });
   }
 
-  void _restoreRunningTimers() {
+  void _stopLocalUiTicker() {
+    _uiTicker?.cancel();
+    _uiTicker = null;
+  }
+
+  void _syncLocalCalculations() {
     final now = DateTime.now();
+    bool hasChanged = false;
 
     for (var task in _tasks) {
       if (task.isRunning && task.targetEndTime != null) {
-        final diffSeconds = task.targetEndTime!.difference(now).inSeconds;
-
-        if (diffSeconds > 0) {
-          task.remainingSeconds = diffSeconds;
-          _startTimerInstance(task);
+        final diff = task.targetEndTime!.difference(now).inSeconds;
+        if (diff > 0) {
+          if (task.remainingSeconds != diff) {
+            task.remainingSeconds = diff;
+            hasChanged = true;
+          }
         } else {
-          // Task đã kết thúc trong lúc đóng/ẩn app
           task.remainingSeconds = 0;
           task.isRunning = false;
-          task.targetEndTime = null;
-          task.timer?.cancel();
-          task.timer = null;
+          hasChanged = true;
         }
       }
     }
-    _saveTasksToStorage();
-    notifyListeners();
+    if (hasChanged) notifyListeners();
   }
 
-  // --- HELPER LOGIC ---
   bool isTaskNameDuplicate(String name) {
     return _tasks.any(
       (task) => task.name.trim().toLowerCase() == name.trim().toLowerCase(),
@@ -82,106 +89,60 @@ class TaskProvider extends ChangeNotifier {
     return (hours * 3600) + (minutes * 60) + seconds;
   }
 
-  // --- TASK MANAGEMENT LOGIC ---
-  void addTask(String name, int hours, int minutes, int seconds) {
-    int totalSeconds = normalizeToSeconds(hours, minutes, seconds);
-    final newTask = TaskModel(
-      id: DateTime.now().millisecondsSinceEpoch.toString(),
-      name: name.trim(),
-      initialTotalSeconds: totalSeconds,
-      remainingSeconds: totalSeconds,
-    );
-    _tasks.add(newTask);
-    _saveTasksToStorage();
-    notifyListeners();
+  // --- FIRESTORE ACTIONS ---
+  Future<void> addTask(String name, int hours, int minutes, int seconds) async {
+    if (_currentUser == null) return;
+    int total = normalizeToSeconds(hours, minutes, seconds);
+    await _firestoreService.addTask(_currentUser!.uid, name, total);
   }
 
-  void toggleTaskTimer(String id) {
-    final index = _tasks.indexWhere((task) => task.id == id);
+  Future<void> toggleTaskTimer(String id) async {
+    if (_currentUser == null) return;
+    final index = _tasks.indexWhere((t) => t.id == id);
     if (index == -1) return;
 
     final task = _tasks[index];
-
     if (task.isRunning) {
-      task.timer?.cancel();
-      task.timer = null;
-      if (task.targetEndTime != null) {
-        final now = DateTime.now();
-        final diff = task.targetEndTime!.difference(now).inSeconds;
-        task.remainingSeconds = diff > 0 ? diff : 0;
-      }
-      task.isRunning = false;
-      task.targetEndTime = null;
+      final now = DateTime.now();
+      final diff = task.targetEndTime?.difference(now).inSeconds ?? task.remainingSeconds;
+      await _firestoreService.updateTimerState(_currentUser!.uid, task, false, diff > 0 ? diff : 0, null);
     } else {
       if (task.remainingSeconds <= 0) return;
-
-      task.isRunning = true;
-      task.targetEndTime = DateTime.now().add(
-        Duration(seconds: task.remainingSeconds),
-      );
-      _startTimerInstance(task);
+      final targetEnd = DateTime.now().add(Duration(seconds: task.remainingSeconds));
+      await _firestoreService.updateTimerState(_currentUser!.uid, task, true, task.remainingSeconds, targetEnd);
     }
-
-    _saveTasksToStorage();
-    notifyListeners();
   }
 
-  void resetTaskTimer(String id) {
-    final index = _tasks.indexWhere((task) => task.id == id);
+  Future<void> resetTaskTimer(String id) async {
+    if (_currentUser == null) return;
+    final index = _tasks.indexWhere((t) => t.id == id);
     if (index == -1) return;
 
-    final task = _tasks[index];
-
-    task.timer?.cancel();
-    task.isRunning = false;
-    task.targetEndTime = null;
-    task.remainingSeconds = task.initialTotalSeconds;
-
-    _saveTasksToStorage();
-    notifyListeners();
+    await _firestoreService.resetTask(_currentUser!.uid, _tasks[index]);
   }
 
-  void _startTimerInstance(TaskModel task) {
-    task.timer?.cancel();
-    task.timer = null;
-
-    task.timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (task.targetEndTime == null || !task.isRunning) {
-        timer.cancel();
-        task.timer = null;
-        return;
-      }
-
-      if (task.remainingSeconds > 1) {
-        task.remainingSeconds--;
-        notifyListeners();
-      } else {
-        task.remainingSeconds = 0;
-        task.isRunning = false;
-        task.targetEndTime = null;
-        timer.cancel();
-        task.timer = null;
-        _saveTasksToStorage();
-        notifyListeners();
-      }
-    });
+  Future<void> deleteTask(String id) async {
+    if (_currentUser == null) return;
+    await _firestoreService.deleteTask(_currentUser!.uid, id);
   }
 
-  void deleteTask(String id) {
-    final index = _tasks.indexWhere((task) => task.id == id);
-    if (index != -1) {
-      _tasks[index].timer?.cancel();
-      _tasks.removeAt(index);
-      _saveTasksToStorage();
-      notifyListeners();
-    }
+  Future<void> sendPasswordlessLink(String email) async {
+    await _authService.sendPasswordlessLink(email);
+  }
+
+  Future<void> completeSignIn(String email, String link) async {
+    await _authService.completeSignInWithEmailLink(email, link);
+  }
+
+  Future<void> signOut() async {
+    await _authService.signOut();
   }
 
   @override
   void dispose() {
-    for (var task in _tasks) {
-      task.timer?.cancel();
-    }
+    _tasksSubscription?.cancel();
+    _authSubscription?.cancel();
+    _stopLocalUiTicker();
     super.dispose();
   }
 }

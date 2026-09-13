@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'providers/task_provider.dart';
 import 'screens/home_screen.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp();
   runApp(const MyApp());
 }
 
@@ -16,26 +18,29 @@ class MyApp extends StatefulWidget {
 }
 
 class _MyAppState extends State<MyApp> {
-  late final AppLifecycleListener _lifecycleListener;
   late final TaskProvider _taskProvider;
 
   @override
   void initState() {
     super.initState();
     _taskProvider = TaskProvider();
+    
+    // Kiểm tra & Xử lý Magic Email Link khi ứng dụng vừa mở
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkIncomingEmailLink();
+    });
+  }
 
-    // Lắng nghe sự kiện Lifecycle trên Safari Web & Mobile
-    _lifecycleListener = AppLifecycleListener(
-      onResume: () {
-        // Đồng bộ tính lại thời gian còn lại khi quay lại ứng dụng
-        _taskProvider.recalculateOnResume();
-      },
-    );
+  void _checkIncomingEmailLink() async {
+    final currentUri = Uri.base;
+    if (currentUri.toString().contains('apiKey=')) {
+      // Nhận email từ local storage hoặc prompt người dùng nhập lại để xác minh
+      // _taskProvider.completeSignIn(email, currentUri.toString());
+    }
   }
 
   @override
   void dispose() {
-    _lifecycleListener.dispose();
     _taskProvider.dispose();
     super.dispose();
   }
@@ -46,12 +51,12 @@ class _MyAppState extends State<MyApp> {
       value: _taskProvider,
       child: MaterialApp(
         debugShowCheckedModeBanner: false,
-        title: 'Pomodoro Local Web',
+        title: 'Pomodoro Multi-Timer Cloud',
         theme: ThemeData(
           useMaterial3: true,
         ),
         home: const HomeScreen(),
-      ), 
+      ),
     );
   }
 }

@@ -1,13 +1,12 @@
-import 'dart:async';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class TaskModel {
   final String id;
   final String name;
-  final int initialTotalSeconds; // Thời gian thiết lập ban đầu (dùng cho Reset)
-  int remainingSeconds;          // Thời gian còn lại hiện tại
+  final int initialTotalSeconds;
+  int remainingSeconds;
   bool isRunning;
-  DateTime? targetEndTime;      // Mốc thời gian đích khi đang chạy
-  Timer? timer;
+  DateTime? targetEndTime;
 
   TaskModel({
     required this.id,
@@ -30,27 +29,27 @@ class TaskModel {
     return "$hStr:$mStr:$sStr";
   }
 
-  Map<String, dynamic> toJson() {
+  Map<String, dynamic> toFirestore() {
     return {
-      'id': id,
       'name': name,
       'initialTotalSeconds': initialTotalSeconds,
       'remainingSeconds': remainingSeconds,
       'isRunning': isRunning,
-      'targetEndTime': targetEndTime?.toIso8601String(),
+      'targetEndTime': targetEndTime != null ? Timestamp.fromDate(targetEndTime!) : null,
     };
   }
 
-  factory TaskModel.fromJson(Map<String, dynamic> json) {
+  factory TaskModel.fromFirestore(DocumentSnapshot<Map<String, dynamic>> snapshot) {
+    final data = snapshot.data() ?? {};
+    final Timestamp? timestamp = data['targetEndTime'] as Timestamp?;
+    
     return TaskModel(
-      id: json['id'] as String,
-      name: json['name'] as String,
-      initialTotalSeconds: (json['initialTotalSeconds'] as int?) ?? (json['remainingSeconds'] as int),
-      remainingSeconds: json['remainingSeconds'] as int,
-      isRunning: json['isRunning'] as bool? ?? false,
-      targetEndTime: json['targetEndTime'] != null
-          ? DateTime.parse(json['targetEndTime'] as String)
-          : null,
+      id: snapshot.id,
+      name: data['name'] ?? '',
+      initialTotalSeconds: (data['initialTotalSeconds'] as int?) ?? 0,
+      remainingSeconds: (data['remainingSeconds'] as int?) ?? 0,
+      isRunning: data['isRunning'] as bool? ?? false,
+      targetEndTime: timestamp?.toDate(),
     );
   }
 }
